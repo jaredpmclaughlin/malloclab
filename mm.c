@@ -87,7 +87,8 @@ static const size_t min_block_size = 4 * sizeof(word_t);
 
 /* Initial heap size (bytes), requires (chunksize % 16 == 0)
 */
-static const size_t chunksize = (1 << 12);    
+//static const size_t chunksize = (1 << 12);    
+static size_t chunksize = (1<<12);
 
 // Mask to extract allocated bit from header
 static const word_t alloc_mask = 0x1;
@@ -215,7 +216,8 @@ int mm_init(void)
         printf("ERROR: extend_heap failed in mm_init, returning");
         return -1;
     }
-
+   
+    // we're pretty much guaranteed to have a free block in the list
     insert_block(free_block);
     heap_start = free_block;
 
@@ -361,30 +363,20 @@ void *mm_malloc(size_t size)
 void mm_free(void *bp)
 {
     size_t asize = 0;
-    
-    if (!(in_heap((void *) bp) )){
-	printf("FREE OUTSIDE OF HEAP\n");
-	 return;
-	}
-
-    if (bp == NULL){
-        return;
-	}
     block_t *free_block = NULL;
+
+    if (bp == NULL) return;
+
     free_block = payload_to_header(bp);
     asize = get_size(free_block); 
-    //printf("Free %lu\n", asize);
-    // at least we won't get it in the free block list, etc
-    if(asize < min_block_size) return;
+
     write_header(free_block, asize, false);
     write_footer(free_block, asize, false);
+
     // insert first to satisfy coalesce assumptions
-    // this has definitely found the right block
-    if (!(in_heap(free_block))) printf("mm_free insert out of heap.\n"); 
     // is there a way to avoid this insert? probably not
-    insert_block(free_block);
+    //insert_block(free_block);
     free_block = coalesce_block(free_block); 
-    //printf("Freed %lu\n", get_size(free_block));
 }
 
 /*
@@ -392,29 +384,23 @@ void mm_free(void *bp)
  */
 static void insert_block(block_t *free_block)
 {
+   // .007%
    if(get_size(free_block) < min_block_size) return;
-   if( !in_heap(free_block) ) {
-	fprintf(stderr, "\n\nATTEMPT TO INSERT OUT OF HEAP IN FREE LIST.\n\n");
-	return;
-	}
 
-   if( free_block == free_list_head ){
-	 //printf("tried to reinsert head\n");
-	 return; 
-	}
+   // .005%
+   if( free_block == free_list_head ) return;
 
-
-
-   if( free_list_head != NULL ){
+   if( free_list_head != NULL ){ // 86%
+	// this is almost always going to be the case.
 	free_list_head->payload.links.prev = free_block;
 	free_block->payload.links.next = free_list_head;
 	free_block->payload.links.prev = NULL;
 	free_list_head = free_block;
-	} else {
+    } else { // 14%
 	free_block->payload.links.next = NULL;
 	free_block->payload.links.prev = NULL;
 	free_list_head = free_block;
-	}
+    }
 }
 
 block_t *check_block(block_t *free_block){
@@ -435,31 +421,21 @@ static void remove_block(block_t *free_block)
     block_t *prev = NULL;
     block_t *next = NULL;
     block_t *test = NULL;
+
     // nothing to do
     if(free_block == NULL) return;
     if(free_list_head == NULL) return; 
-    // make sure the block is in the list before we try to remove...
-/*
-    test = free_list_head;
-    while ( test != free_block){
-	test = test->payload.links.next;
-	if(test == NULL) return;
-    }
-*/
-	// the following splits the above out for profiling
-	// checking if the block is there is stable but slow
-	if( check_block(free_block) == NULL) return;
 
-	prev = free_block->payload.links.prev;
-	next = free_block->payload.links.next;
+    prev = free_block->payload.links.prev;
+    next = free_block->payload.links.next;
 
-    // singleton
+    // singleton 5.6%
     if(prev==NULL && next==NULL){
 	 free_list_head = NULL;
 	 return;
     }
 
-    //head
+    //head 49.5%
     if(prev==NULL && next!=NULL)
     {
         free_list_head = next;
@@ -467,13 +443,13 @@ static void remove_block(block_t *free_block)
 	return;
     }
 
-    //tail
+    //tail 2%
     if(prev!=NULL && next==NULL){
 	 prev->payload.links.next=NULL;	
 	 return; // if you don't, it can short circuit below
     }
 
-    //middle
+    //middle 42.7%
     if(prev!=NULL && next!=NULL) 
     {
         prev->payload.links.next = next;
@@ -490,34 +466,31 @@ static block_t *find_fit(size_t asize)
     block_t *cur = free_list_head;
     block_t *free_block;
 
+    // the request is too small
     if(asize < min_block_size) return NULL;
 
     while(cur!=NULL){
 	if(get_size(cur) >= (asize+dsize+min_block_size)) return cur;
-	// NEXT IS STRANGE
 	cur = cur->payload.links.next;
     }
-    // we didn't find anything, expand the heap
-    do {
-    	free_block = extend_heap(chunksize);
-    	if (free_block == NULL) return NULL; 
 
-    	if(!in_heap(free_block)) printf("find_fit insert out of heap.\n");
+    /* Didn't find anything, expand heap.
+    *  For smaller requests, get a chunk, if it's bigger, just fulfill that
+    *  maybe it's better to adjust the chunksize upwards if this is a repeated problem? 
+    */
 
-// can we avoid the insert?
-    	insert_block(free_block);
-    	free_block = coalesce_block(free_block);
-	
-    }while( free_block != NULL && (asize > get_size(free_block)));
-    if( !(in_heap(free_block))) printf("find fit coalesced block fault\n");
-    if( free_block == NULL) printf("coalesced block fault\n");
-	// in the current strategy, we inserted this at the head
-	// therefore this should return pretty quickly
-        if ( asize > get_size(free_block)){
-		 printf("find fit fails sanity check\n");
-		 printf("asize %lu\tfree_block %lu\n", asize, get_size(free_block));
-	}
-	return free_block;
+    asize = asize > chunksize ? (asize+dsize+min_block_size) : chunksize; 
+    free_block = extend_heap(asize);
+
+    // This is better for performance, the above is better for utilization
+    //chunksize = asize > chunksize ? (asize+dsize+min_block_size) : chunksize;
+    //free_block = extend_heap(chunksize);
+
+    // can we avoid the insert? probably not
+    //insert_block(free_block);
+    free_block = coalesce_block(free_block);
+
+    return free_block;
 }
 
 /*
@@ -554,16 +527,24 @@ static block_t *coalesce_block(block_t *block)
     if(!prev_alloc) blksz += prev_sz;
     if(!next_alloc) blksz += next_sz;
 
-	// is this in the list?
-    if(!prev_alloc) remove_block((block_t*)(prev_head));
-    if(!next_alloc) remove_block((block_t *)(next_head));
-    remove_block(block);
+    // every time it's not in the list during a remove attempt, it's here. 
+    // it's a small occurence, but if you try to remove, it will crash
+    if(!prev_alloc){ 
+	 if ( check_block((block_t *)(prev_head)) != NULL) { 
+	 remove_block((block_t*)(prev_head));
+	}
+    }
+
+    if(!next_alloc){
+	 if ( check_block((block_t *)(next_head)) != NULL) {
+	 remove_block((block_t *)(next_head));
+	}
+    }
+    //remove_block(block);
 
     *new_head = pack(blksz, false);
     *new_foot = pack(blksz, false); 
-    if(!in_heap(new_head)) printf("coalesce inserts out of heap.\n");
     insert_block((block_t *)(new_head));
- 
     return (block_t *)(new_head); 
 }
 
@@ -576,11 +557,6 @@ static void split_block(block_t *block, size_t asize)
     size_t bsize = get_size(block);
     block_t *fblock = (block_t *)(((word_t *)(block))+(asize/wsize)) ;
 
-    if( asize > get_size(block) ){
-	 printf("aszie too big in split_block\n");
-	 return NULL;
-    }
-
     // avoid the chance of splitting blocks too small
     if( !(asize >= min_block_size) && !((bsize-asize) > min_block_size)) return;
 
@@ -592,7 +568,7 @@ static void split_block(block_t *block, size_t asize)
     //fix up the /old/ block
     write_header(block, asize, true);
     write_footer(block, asize, true);
-    if(!in_heap(fblock)) printf("split_block inserts out of heap\n");
+
     insert_block(fblock);
 }
 /*
