@@ -150,6 +150,9 @@ struct block
 // Pointer to first block
 static block_t *heap_start = NULL;
 
+// a heap for 3 word fixed blocks
+static block_t *small_heap = NULL;
+
 // Pointer to the first block in the free list
 static block_t *free_list_head = NULL;
 
@@ -188,10 +191,12 @@ static void insert_block(block_t *free_block);
 static void remove_block(block_t *free_block);
 
 void print_blocks();
+int sm_init();
 
 /* 
  * mm_init - Initialize the memory manager 
  */
+//void *sm_malloc();
 int mm_init(void)
 {
     /* Create the initial empty heap */
@@ -221,7 +226,27 @@ int mm_init(void)
     insert_block(free_block);
     heap_start = free_block;
 
+    small_heap = mm_malloc(wsize*((24*wsize)+2));
+	if ( small_heap == NULL) printf("Small Heap Fail\n");
+    sm_init();
   return 0;
+}
+
+int sm_init(){
+    small_heap->header = 0x0;	
+ return 0;
+}
+
+// no size because all blocks are three words
+void *sm_malloc(){
+    word_t mask =1;
+    word_t i = 0;
+
+    for (; (mask<<i)&(small_heap->header)  ; i++);
+	printf("%u\n", i);
+	small_heap->header++;
+
+    return NULL;
 }
 
 /***** MY OWN ADDITION, REMOVE BEFORE TURNING IN
@@ -322,7 +347,19 @@ void *mm_malloc(size_t size)
     size_t asize;      // Allocated block size
     block_t *block;
     block_t *ret;
-    //printf("malloc %zu\n", size); 
+   
+
+    if ( size < (3*wsize)) sm_malloc(); 
+ /*
+	Total 		782386 
+	<= 3x				(30%)
+	3x - 16x			(30%)
+ 	16x - 300x			(9%)	
+	300x - 500x			(%20)
+	>  500x				(%11)
+	MAX 5388x
+*/  
+
     if (size == 0) // Ignore spurious request
         return NULL;
     
@@ -592,8 +629,7 @@ static block_t *extend_heap(size_t size)
     ((word_t *)(bp))[-1] = pack(size,false);  
     //and set the footer to the same
     ((word_t *)(bp))[(size/wsize)-2] = pack(size,false);
-    // You will want to replace this return statement...
-    //return bp;
+
     return payload_to_header(bp);
 }
 
