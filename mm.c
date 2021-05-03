@@ -15,9 +15,6 @@
 #include "memlib.h"
 #include "mm.h"
 
-static int in_heap(const void* p);
-
-
  /* 
  *
  * Each block has header and footer of the form:
@@ -150,15 +147,12 @@ struct block
 // Pointer to first block
 static block_t *heap_start = NULL;
 
-// a heap for 3 word fixed blocks
-static block_t *small_heap = NULL;
-
 // Pointer to the first block in the free list
 static block_t *free_list_head = NULL;
 
 /* Function prototypes for internal helper routines */
 
-static size_t max(size_t x, size_t y);
+//static size_t max(size_t x, size_t y);
 static block_t *find_fit(size_t asize);
 static block_t *coalesce_block(block_t *block);
 static void split_block(block_t *block, size_t asize);
@@ -170,7 +164,7 @@ static size_t extract_size(word_t header);
 static size_t get_size(block_t *block);
 
 static bool extract_alloc(word_t header);
-static bool get_alloc(block_t *block);
+//static bool get_alloc(block_t *block);
 
 static void write_header(block_t *block, size_t size, bool alloc);
 static void write_footer(block_t *block, size_t size, bool alloc);
@@ -179,24 +173,22 @@ static block_t *payload_to_header(void *bp);
 static void *header_to_payload(block_t *block);
 static word_t *header_to_footer(block_t *block);
 
-static block_t *find_next(block_t *block);
+//static block_t *find_next(block_t *block);
 static word_t *find_prev_footer(block_t *block);
-static block_t *find_prev(block_t *block);
+//static block_t *find_prev(block_t *block);
 
-static bool check_heap();
-static void examine_heap();
+//static bool check_heap();
+//static void examine_heap();
+static int in_heap(const void* p);
 
 static block_t *extend_heap(size_t size);
 static void insert_block(block_t *free_block);
 static void remove_block(block_t *free_block);
 
-void print_blocks();
-int sm_init();
 
 /* 
  * mm_init - Initialize the memory manager 
  */
-//void *sm_malloc();
 int mm_init(void)
 {
     /* Create the initial empty heap */
@@ -226,117 +218,7 @@ int mm_init(void)
     insert_block(free_block);
     heap_start = free_block;
 
-    small_heap = mm_malloc(wsize*((24*wsize)+2));
-	if ( small_heap == NULL) printf("Small Heap Fail\n");
-    sm_init();
   return 0;
-}
-
-int sm_init(){
-    small_heap->header = 0x0;	
- return 0;
-}
-
-// no size because all blocks are three words
-void *sm_malloc(){
-    word_t mask =1;
-    word_t i = 0;
-
-    for (; (mask<<i)&(small_heap->header)  ; i++);
-	printf("%u\n", i);
-	small_heap->header++;
-
-    return NULL;
-}
-
-/***** MY OWN ADDITION, REMOVE BEFORE TURNING IN
-*/
-
-void print_free_list();
-
-void printblocks(int sum){
-    word_t *blocks = (word_t *)mem_heap_lo();
-    word_t end_block  = pack(0,true);
-    const char *outs = "%lu\t%16x\t%lu\t%d\n";
-    #define OUTSZ extract_size(*(blocks+line)) 
-    #define OUTAL extract_alloc(*(blocks+line)) 
-
-
-	fprintf(stderr,"Heap is %lu bytes, %lu words.\n", mem_heapsize(), mem_heapsize()/8);
-	word_t line = 1;
-	word_t printable = 0;
-
-	for( ; *(blocks+line) != end_block && sum == 1 ; line++ ){
-		if(OUTSZ || OUTAL) printable++;	
-	}
-
-	if(printable > 30) printable = 30;
-
-	for( ; printable > 0 && sum == 1; line--){
-		if(OUTSZ || OUTAL) printable--;
-	}
-
-	fprintf(stderr,outs , 0, blocks, extract_size(*blocks), extract_alloc(*blocks));
-
-	for( ; *(blocks+line) != end_block; line++ ){
-		if(OUTSZ || OUTAL ) {
-
-			fprintf(stderr,outs, line, (blocks+line), OUTSZ, OUTAL);
-		}
-	};
-	fprintf(stderr,outs, line, (blocks+line), OUTSZ, OUTAL);
-
- // print_free_list();
-}
-
-void print_blocks(){
-	printblocks(0);
-}
-
-void print_all_blocks(){
-	printblocks(0);
-}
-
-
-void print_free_list(){
-  block_t *curr = free_list_head; 
-  size_t blksz;
-  word_t *foot;
-  word_t *pfoot;
-  word_t *nhead;
-  word_t *phead;
-  word_t *nfoot;
-  size_t psz;
-  size_t nsz;
- // print_all_blocks();
-  fprintf(stderr,"\nFree List\n");
-	
-  while(curr!=NULL){
-  	blksz = get_size(curr);
-	pfoot = find_prev_footer(curr);
-	nhead = &(curr->header)+(long unsigned int)(blksz/wsize);
-	psz = extract_size(*pfoot);
-	nsz = extract_size(*nhead);
-	phead = psz>0 ? pfoot - (psz/wsize)+1 : pfoot;
-	//phead = pfoot - (psz/wsize)+1;
-	nfoot = nsz>0 ? nhead + (nsz/wsize)-1 : nhead;
-	//nfoot = nhead + (nsz/wsize)+1;
-	foot = (word_t *)(curr) + (blksz/wsize)-1;
-
-	fprintf(stderr, "SIZE\tALLOC\t ADDR\t\t FOOT\t");
-	fprintf(stderr, "\tPSIZE\t  PADDR\t\t   PFOOT");
-	fprintf(stderr, "\tNSIZE\t  NADDR\t\t   NFOOT");
-	fprintf(stderr, "\n");
-	fprintf(stderr,"%lu\t%d%16x%16x\t", blksz, get_alloc(curr), curr, foot);
-	fprintf(stderr, "%lu %16x %16x\t", psz, phead, pfoot);
-	fprintf(stderr, "%lu %16x %16x\t", nsz, nhead, nfoot);
-	fprintf(stderr, "\n");
-        if( curr == curr->payload.links.next){
-	 fprintf(stderr, "\n\n\t\tLOOP IN FREE LIST\n\n");
-	 return;
-	}
-	curr= curr->payload.links.next;
-  }
 }
 
 /* 
@@ -348,18 +230,6 @@ void *mm_malloc(size_t size)
     block_t *block;
     block_t *ret;
    
-
-    if ( size < (3*wsize)) sm_malloc(); 
- /*
-	Total 		782386 
-	<= 3x				(30%)
-	3x - 16x			(30%)
- 	16x - 300x			(9%)	
-	300x - 500x			(%20)
-	>  500x				(%11)
-	MAX 5388x
-*/  
-
     if (size == 0) // Ignore spurious request
         return NULL;
     
@@ -373,12 +243,6 @@ void *mm_malloc(size_t size)
     // search free list naively stop at first large enough
 
     block = find_fit(asize);
-    if (! in_heap(block)){
-	 printf("find_fit returned out of heap.\n");
-	 print_blocks();
-	 print_free_list();
-         printf("Requested %zu\n", asize);
-	}	
  
     if( block == NULL){
 	 return NULL;
@@ -387,10 +251,7 @@ void *mm_malloc(size_t size)
     split_block(block,asize);
 
     ret = header_to_payload(block); 
-    if ( in_heap((void *) ret)) return ret;
-	 print_blocks();
-	print_free_list();
-    return NULL;
+    return ret;
 }
 
 
@@ -410,9 +271,6 @@ void mm_free(void *bp)
     write_header(free_block, asize, false);
     write_footer(free_block, asize, false);
 
-    // insert first to satisfy coalesce assumptions
-    // is there a way to avoid this insert? probably not
-    //insert_block(free_block);
     free_block = coalesce_block(free_block); 
 }
 
@@ -421,31 +279,44 @@ void mm_free(void *bp)
  */
 static void insert_block(block_t *free_block)
 {
-   // .007%
    if(get_size(free_block) < min_block_size) return;
 
-   // .005%
    if( free_block == free_list_head ) return;
 
-   if( free_list_head != NULL ){ // 86%
+   if( free_list_head != NULL ){ 
 	// this is almost always going to be the case.
 	free_list_head->payload.links.prev = free_block;
 	free_block->payload.links.next = free_list_head;
 	free_block->payload.links.prev = NULL;
 	free_list_head = free_block;
-    } else { // 14%
+    } else { 
 	free_block->payload.links.next = NULL;
 	free_block->payload.links.prev = NULL;
 	free_list_head = free_block;
     }
 }
-
+/*
 block_t *check_block(block_t *free_block){
 	block_t *test = free_list_head;
-	if(test == NULL) return;
+	if(test == NULL) return NULL;
 	while(test!=free_block){
 		test = test->payload.links.next;
 		if(test==NULL) return NULL;
+	}
+	return free_block;
+}
+*/
+
+block_t *check_block(block_t *free_block){
+	if (free_block == NULL) return NULL;
+
+ 	if ( in_heap(free_block)){
+	   if ( free_block->payload.links.prev != NULL){
+		if(!in_heap(free_block->payload.links.prev)) return NULL;
+	   } 
+	   if ( free_block->payload.links.next != NULL){
+		if(!in_heap(free_block->payload.links.next)) return NULL;
+	   }
 	}
 	return free_block;
 }
@@ -457,7 +328,6 @@ static void remove_block(block_t *free_block)
 {
     block_t *prev = NULL;
     block_t *next = NULL;
-    block_t *test = NULL;
 
     // nothing to do
     if(free_block == NULL) return;
@@ -523,8 +393,6 @@ static block_t *find_fit(size_t asize)
     //chunksize = asize > chunksize ? (asize+dsize+min_block_size) : chunksize;
     //free_block = extend_heap(chunksize);
 
-    // can we avoid the insert? probably not
-    //insert_block(free_block);
     free_block = coalesce_block(free_block);
 
     return free_block;
@@ -577,7 +445,6 @@ static block_t *coalesce_block(block_t *block)
 	 remove_block((block_t *)(next_head));
 	}
     }
-    //remove_block(block);
 
     *new_head = pack(blksz, false);
     *new_foot = pack(blksz, false); 
@@ -643,24 +510,21 @@ static int in_heap(const void* p)
 {
     return p <= mem_heap_hi() && p >= mem_heap_lo();
 }
-
 /*
  * examine_heap -- Print the heap by iterating through it as an implicit free list. 
  */
+/*
 static void examine_heap() {
   block_t *block;
 
-  /* print to stderr so output isn't buffered and not output if we crash */
   fprintf(stderr, "free_list_head: %p\n", (void *)free_list_head);
 
-  for (block = heap_start; /* first block on heap */
+  for (block = heap_start; 
       get_size(block) > 0 && block < (block_t*)mem_heap_hi();
       block = find_next(block)) {
 
-    /* print out common block attributes */
     fprintf(stderr, "%p: %ld %d\t", (void *)block, get_size(block), get_alloc(block));
 
-    /* and allocated/free specific data */
     if (get_alloc(block)) {
       fprintf(stderr, "ALLOCATED\n");
     } else {
@@ -671,17 +535,17 @@ static void examine_heap() {
   }
   fprintf(stderr, "END OF HEAP\n\n");
 }
-
+*/
 
 /* check_heap: checks the heap for correctness; returns true if
  *               the heap is correct, and false otherwise.
  */
+/*
 static bool check_heap()
 {
 
     // Implement a heap consistency checker as needed.
 
-    /* Below is an example, but you will need to write the heap checker yourself. */
 
     if (!heap_start) {
         printf("NULL heap list pointer!\n");
@@ -709,7 +573,7 @@ static bool check_heap()
 
     return true;
 }
-
+*/
 
 /*
  *****************************************************************************
@@ -721,11 +585,12 @@ static bool check_heap()
 /*
  * max: returns x if x > y, and y otherwise.
  */
+/*
 static size_t max(size_t x, size_t y)
 {
     return (x > y) ? x : y;
 }
-
+*/
 
 /*
  * round_up: Rounds size up to next multiple of n
@@ -780,11 +645,12 @@ static bool extract_alloc(word_t word)
  * get_alloc: returns true when the block is allocated based on the
  *            block header's lowest bit, and false otherwise.
  */
+/*
 static bool get_alloc(block_t *block)
 {
     return extract_alloc(block->header);
 }
-
+*/
 
 /*
  * write_header: given a block and its size and allocation status,
@@ -812,11 +678,12 @@ static void write_footer(block_t *block, size_t size, bool alloc)
  * find_next: returns the next consecutive block on the heap by adding the
  *            size of the block.
  */
+/*
 static block_t *find_next(block_t *block)
 {
     return (block_t *) ((unsigned char *) block + get_size(block));
 }
-
+*/
 
 /*
  * find_prev_footer: returns the footer of the previous block.
@@ -833,13 +700,14 @@ static word_t *find_prev_footer(block_t *block)
  *            block's footer and calculating the start of the previous block
  *            based on its size.
  */
+/*
 static block_t *find_prev(block_t *block)
 {
     word_t *footerp = find_prev_footer(block);
     size_t size = extract_size(*footerp);
     return (block_t *) ((unsigned char *) block - size);
 }
-
+*/
 
 /*
  * payload_to_header: given a payload pointer, returns a pointer to the
